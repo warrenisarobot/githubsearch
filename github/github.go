@@ -38,7 +38,7 @@ func NewAPI(token string) GitHubAPI {
 	}
 }
 
-func (g *GitHubAPI) Search(searchText, organization string, maxRequests int) ([]FileMatch, error) {
+func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests int) ([]FileMatch, error) {
 	page := 1
 	per_page := githubAPIMaxPages
 	u := g.url(githubAPIsearchPath)
@@ -48,7 +48,7 @@ func (g *GitHubAPI) Search(searchText, organization string, maxRequests int) ([]
 	for {
 		u.RawQuery = g.searchQuery(searchText, organization, page, per_page)
 
-		log.Info().Str("url", u.String()).Str("searchText", searchText).Str("queryParams", u.RawQuery).Msg("Creating search request")
+		log.Info().Str("url", u.String()).Interface("searchText", searchText).Str("queryParams", u.RawQuery).Msg("Creating search request")
 
 		req, err := g.newRequest("GET", u.String())
 		if err != nil {
@@ -76,7 +76,6 @@ func (g *GitHubAPI) Search(searchText, organization string, maxRequests int) ([]
 			return nil, fmt.Errorf("Failed matching search result text: %w", err)
 		}
 		matchesToReturn = append(matchesToReturn, newres...)
-		fmt.Printf("Size after: %d\n", len(newres))
 		if matches.TotalCount == 0 || ((page-1)*per_page)+len(matches.Items) >= matches.TotalCount {
 			break
 		}
@@ -92,7 +91,7 @@ func (g *GitHubAPI) Search(searchText, organization string, maxRequests int) ([]
 //
 //This would find places that import the github.com/project/pacakge/subpack package, and have instances
 //of the text subpack.New (adjusted if an alias is used in the import)
-func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) ([]CodeSearchMatch, error) {
+func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) ([]FileMatch, error) {
 	matches := goImportPathParts.FindStringSubmatch(searchText)
 	importPath := ""
 	resource := ""
@@ -101,31 +100,23 @@ func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) (
 		resource = matches[2]
 	}
 
-	fmt.Printf("searchText: %s, importPath: %s, Resource: %s, Matches: %s\n", searchText, importPath, resource, matches)
-
-	res, err := g.Search(importPath, organization, maxRequests)
+	searchRes, err := g.Search([]string{importPath, resource}, organization, maxRequests)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, item := range res {
+	res := []FileMatch{}
+
+	for _, item := range searchRes {
 		alias := g.getImportAlias(string(item.Content()), importPath)
 		searchMe := alias + "." + resource
-		//fmt.Printf("Repo: %s, File: %s, Alias: %s, Searching: %s\n", item.Name, item.Path, alias, searchMe)
-		matches := item.StringInLines(searchMe)
-		for _, match := range matches {
-			fmt.Printf("%d: %s\n", match.Row, item.Lines()[match.Row-1])
+		lineMatches := item.StringInLines(searchMe)
+		if len(lineMatches) > 0 {
+			item.LineMatches = lineMatches
+			res = append(res, item)
 		}
 	}
-	return nil, nil
-}
-
-func (g *GitHubAPI) findMatchingLine(fileContent, searchText string) {
-	for lineNumber, line := range strings.Split(string(fileContent), "\n") {
-		if strings.Contains(line, searchText) {
-			fmt.Printf("%d: %s\n", lineNumber+1, line)
-		}
-	}
+	return res, nil
 }
 
 //check the given file context for the importPath and return if an alias is used.  Empty string means no alias
@@ -215,8 +206,8 @@ func (g *GitHubAPI) searchParts(org string) string {
 	return strings.Join(parts, " ")
 }
 
-func (g *GitHubAPI) searchQuery(searchText, organization string, page, per_page int) string {
-	replacedString := searchText
+func (g *GitHubAPI) searchQuery(searchText []string, organization string, page, per_page int) string {
+	replacedString := strings.Join(searchText, " ")
 	for _, ch := range githubInvalidSearchChars {
 		replacedString = strings.ReplaceAll(replacedString, string(ch), " ")
 	}
@@ -227,7 +218,8 @@ func (g *GitHubAPI) searchQuery(searchText, organization string, page, per_page 
 	return v.Encode()
 }
 
-func (g *GitHubAPI) searchResultsMatchText(searchText string, results []CodeSearchMatch) ([]FileMatch, error) {
+//return a list of FileMatches that have all at least 1 exact match of the given searchText terms
+func (g *GitHubAPI) searchResultsMatchText(searchText []string, results []CodeSearchMatch) ([]FileMatch, error) {
 	res := []FileMatch{}
 	for _, item := range results {
 		localMatch := NewFileMatchFromCodeSearch(item)
@@ -240,9 +232,16 @@ func (g *GitHubAPI) searchResultsMatchText(searchText string, results []CodeSear
 			return nil, fmt.Errorf("Failed to decode content: %w", err)
 		}
 		localMatch.AddContent(string(content))
-		matches := localMatch.StringInLines(searchText)
-		if len(matches) > 0 {
-			localMatch.LineMatches = matches
+		found := true
+		for _, searchTerm := range searchText {
+			matches := localMatch.StringInLines(searchTerm)
+			if len(matches) > 0 {
+				localMatch.LineMatches = append(localMatch.LineMatches, matches...)
+			} else {
+				found = false
+			}
+		}
+		if found {
 			res = append(res, *localMatch)
 		}
 	}

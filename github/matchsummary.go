@@ -1,10 +1,14 @@
 package github
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 type FileMatch struct {
-	Name string
-	Path string
+	RepoName string
+	Name     string
+	Path     string
 	//raw JSON file via api
 	URL string
 	//human readable version
@@ -22,10 +26,11 @@ type LineMatch struct {
 
 func NewFileMatchFromCodeSearch(csm CodeSearchMatch) *FileMatch {
 	return &FileMatch{
-		Name:    csm.Name,
-		Path:    csm.Path,
-		URL:     csm.URL,
-		HTMLURL: csm.HTMLURL,
+		Name:     csm.Name,
+		Path:     csm.Path,
+		URL:      csm.URL,
+		HTMLURL:  csm.HTMLURL,
+		RepoName: csm.Repository.FullName,
 	}
 }
 
@@ -51,4 +56,12 @@ func (fm *FileMatch) StringInLines(searchText string) []LineMatch {
 		}
 	}
 	return res
+}
+
+func (fm *FileMatch) String() string {
+	lines := make([]string, len(fm.LineMatches))
+	for index, lm := range fm.LineMatches {
+		lines[index] = fmt.Sprintf("\t%d: %s\n", lm.Row, fm.lines[lm.Row-1])
+	}
+	return fmt.Sprintf("%s\n\t%s\n%s", fm.RepoName, fm.Path, strings.Join(lines, ""))
 }

@@ -26,14 +26,20 @@ func SearchCommandRun(cmd *cobra.Command, args []string, cov *CommandOptionValue
 	gh := github.NewAPI(cov.Token)
 	fmt.Printf("Token: %s\nSearchText: %s\n", cov.Token, cov.SearchText)
 	var err error
+	var res []github.FileMatch
 	switch cov.SearchType {
 	case "gopackage":
-		_, err = gh.GoSearch(cov.SearchText, cov.Organization, cov.MaxConcurrentRequests)
+		res, err = gh.GoSearch(cov.SearchText, cov.Organization, cov.MaxConcurrentRequests)
 	default:
-		_, err = gh.Search(cov.SearchText, cov.Organization, cov.MaxConcurrentRequests)
+		res, err = gh.Search([]string{cov.SearchText}, cov.Organization, cov.MaxConcurrentRequests)
 
 	}
 	if err != nil {
 		log.Error().Err(err).Msg("Search failed")
+	}
+
+	fmt.Print("Results:\n")
+	for _, item := range res {
+		fmt.Printf("%s\n", item.String())
 	}
 }
