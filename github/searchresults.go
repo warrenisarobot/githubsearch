@@ -1,5 +1,7 @@
 package github
 
+// Github search result data structures
+
 type CodeSearchResults struct {
 	TotalCount        int               `json:"total_count"`
 	IncompleteResults bool              `json:"incomplete_results"`

@@ -6,7 +6,6 @@ import (
 
 type CommandOptionValues struct {
 	Token                 string
-	SearchText            string
 	SearchType            string
 	Organization          string
 	MaxConcurrentRequests int
@@ -16,7 +15,7 @@ var searchCmd = &cobra.Command{}
 
 func Generate(cov *CommandOptionValues) *cobra.Command {
 	rootCmd := &cobra.Command{
-		Use:   "search",
+		Use:   "githubsearch",
 		Short: "Search for a thing",
 	}
 

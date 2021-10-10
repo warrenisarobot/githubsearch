@@ -2,6 +2,7 @@ package github
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -38,7 +39,7 @@ func NewAPI(token string) GitHubAPI {
 	}
 }
 
-func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests int) ([]FileMatch, error) {
+func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests int, rawSearchParams ...string) ([]FileMatch, error) {
 	page := 1
 	per_page := githubAPIMaxPages
 	u := g.url(githubAPIsearchPath)
@@ -46,7 +47,7 @@ func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests
 	matchesToReturn := []FileMatch{}
 
 	for {
-		u.RawQuery = g.searchQuery(searchText, organization, page, per_page)
+		u.RawQuery = g.searchQuery(searchText, organization, page, per_page, rawSearchParams...)
 
 		log.Info().Str("url", u.String()).Interface("searchText", searchText).Str("queryParams", u.RawQuery).Msg("Creating search request")
 
@@ -61,11 +62,17 @@ func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests
 			return nil, err
 		}
 
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return nil, errors.New(fmt.Sprintf("Bad status: %s", resp.Status))
+		}
+
 		matches := &CodeSearchResults{}
 		data, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("Could not read searh results: %w", err)
 		}
+
+		log.Debug().RawJSON("Body", data).Msg("Search results retreived")
 		err = json.Unmarshal(data, matches)
 		if err != nil {
 			return nil, fmt.Errorf("Could not unmarshall search results: %w", err)
@@ -100,7 +107,7 @@ func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) (
 		resource = matches[2]
 	}
 
-	searchRes, err := g.Search([]string{importPath, resource}, organization, maxRequests)
+	searchRes, err := g.Search([]string{importPath, resource}, organization, maxRequests, "language:go")
 	if err != nil {
 		return nil, err
 	}
@@ -206,11 +213,15 @@ func (g *GitHubAPI) searchParts(org string) string {
 	return strings.Join(parts, " ")
 }
 
-func (g *GitHubAPI) searchQuery(searchText []string, organization string, page, per_page int) string {
+func (g *GitHubAPI) searchQuery(searchText []string, organization string, page, per_page int, rawSearchParams ...string) string {
 	replacedString := strings.Join(searchText, " ")
 	for _, ch := range githubInvalidSearchChars {
 		replacedString = strings.ReplaceAll(replacedString, string(ch), " ")
 	}
+	if len(rawSearchParams) > 0 {
+		replacedString += " " + strings.Join(rawSearchParams, " ")
+	}
+
 	v := url.Values{}
 	v.Add("q", fmt.Sprintf("%s %s", replacedString, g.searchParts(organization)))
 	v.Add("per_page", fmt.Sprintf("%d", per_page))
