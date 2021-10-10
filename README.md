@@ -30,4 +30,5 @@ To search for the text `one:two:three` in the `my-company` organization:
 
 To search for usage of the `New` function in the go package `github.com/someusername/reponame/package`:
 
+
 `githubsearch search --searchtype=gopackage github.com/someusername/reponame/package.New`
