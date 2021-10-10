@@ -24,9 +24,8 @@ func SearchCommand(cov *CommandOptionValues) *cobra.Command {
 }
 
 func SearchCommandRun(cmd *cobra.Command, args []string, cov *CommandOptionValues) {
-	gh := github.NewAPI(cov.Token)
+	gh := github.NewAPI(cov.Token())
 	searchText := strings.Join(args, " ")
-	fmt.Printf("Token: %s\nSearchText: %s\n", cov.Token, searchText)
 	var err error
 	var res []github.FileMatch
 	switch cov.SearchType {
