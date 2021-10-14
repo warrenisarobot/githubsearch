@@ -11,6 +11,7 @@ type CommandOptionValues struct {
 	SearchType            string
 	Organization          string
 	MaxConcurrentRequests int
+	OutputFormt           string
 }
 
 func (cov *CommandOptionValues) Token() string {
@@ -35,6 +36,7 @@ func Generate(cov *CommandOptionValues) *cobra.Command {
 
 	rootCmd.PersistentFlags().StringVarP(&cov.TokenOverride, "token", "t", "", "Github auth token to use for searching.  If this is not provided the env vars GH_TOKEN, or GITHUB_TOKEN will be used if available")
 	rootCmd.PersistentFlags().IntVarP(&cov.MaxConcurrentRequests, "maxrequests", "m", 5, "Github auth token to use for searching")
+	rootCmd.PersistentFlags().StringVarP(&cov.OutputFormt, "format", "f", "text", "output format.  Can be either 'text' or 'json'")
 	rootCmd.AddCommand(SearchCommand(cov))
 	return rootCmd
 }

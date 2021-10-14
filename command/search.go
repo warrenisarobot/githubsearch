@@ -9,6 +9,11 @@ import (
 	"github.com/warrenisarobot/githubsearch/github"
 )
 
+type SearchResult interface {
+	String() (string, error)
+	JSON() (string, error)
+}
+
 func SearchCommand(cov *CommandOptionValues) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "search [text to search]",
@@ -27,7 +32,7 @@ func SearchCommandRun(cmd *cobra.Command, args []string, cov *CommandOptionValue
 	gh := github.NewAPI(cov.Token())
 	searchText := strings.Join(args, " ")
 	var err error
-	var res []github.FileMatch
+	var res SearchResult
 	switch cov.SearchType {
 	case "gopackage":
 		res, err = gh.GoSearch(searchText, cov.Organization, cov.MaxConcurrentRequests)
@@ -39,8 +44,16 @@ func SearchCommandRun(cmd *cobra.Command, args []string, cov *CommandOptionValue
 		log.Error().Err(err).Msg("Search failed")
 	}
 
-	fmt.Print("Results:\n")
-	for _, item := range res {
-		fmt.Printf("%s\n", item.String())
+	var out string
+	if cov.OutputFormt == "json" {
+		out, err = res.JSON()
+	} else {
+		out, err = res.String()
 	}
+	if err != nil {
+		log.Err(err).Msg("Error displaying return value")
+		return
+	}
+
+	fmt.Print(out)
 }

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/rs/zerolog/log"
 )
@@ -39,7 +40,7 @@ func NewAPI(token string) GitHubAPI {
 	}
 }
 
-func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests int, rawSearchParams ...string) ([]FileMatch, error) {
+func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests int, rawSearchParams ...string) (FileMatches, error) {
 	page := 1
 	per_page := githubAPIMaxPages
 	u := g.url(githubAPIsearchPath)
@@ -72,13 +73,12 @@ func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests
 			return nil, fmt.Errorf("Could not read searh results: %w", err)
 		}
 
-		log.Debug().RawJSON("Body", data).Msg("Search results retreived")
 		err = json.Unmarshal(data, matches)
 		if err != nil {
 			return nil, fmt.Errorf("Could not unmarshall search results: %w", err)
 		}
 		log.Debug().Int("results", len(matches.Items)).Int("totalResults", matches.TotalCount).Bool("incomplete", matches.IncompleteResults).Msg("Parsed search results")
-		newres, err := g.searchResultsMatchText(searchText, matches.Items)
+		newres, err := g.searchResultsMatchText(searchText, matches.Items, maxRequests)
 		if err != nil {
 			return nil, fmt.Errorf("Failed matching search result text: %w", err)
 		}
@@ -98,7 +98,7 @@ func (g *GitHubAPI) Search(searchText []string, organization string, maxRequests
 //
 //This would find places that import the github.com/project/pacakge/subpack package, and have instances
 //of the text subpack.New (adjusted if an alias is used in the import)
-func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) ([]FileMatch, error) {
+func (g *GitHubAPI) GoSearch(searchText, organization string, maxRequests int) (FileMatches, error) {
 	matches := goImportPathParts.FindStringSubmatch(searchText)
 	importPath := ""
 	resource := ""
@@ -155,7 +155,6 @@ func (g *GitHubAPI) getImportAlias(fileContent, importPath string) string {
 }
 
 func (g *GitHubAPI) getFile(url string) (*FileResults, error) {
-	log.Info().Str("url", url).Msg("Downloading file from github")
 	req, err := g.newRequest("GET", url)
 	if err != nil {
 		return nil, fmt.Errorf("Request creation failed: %w", err)
@@ -230,15 +229,12 @@ func (g *GitHubAPI) searchQuery(searchText []string, organization string, page, 
 }
 
 //return a list of FileMatches that have all at least 1 exact match of the given searchText terms
-func (g *GitHubAPI) searchResultsMatchText(searchText []string, results []CodeSearchMatch) ([]FileMatch, error) {
-	res := []FileMatch{}
-	for _, item := range results {
-		localMatch := NewFileMatchFromCodeSearch(item)
-		f, err := g.getFile(item.URL)
-		if err != nil {
-			return nil, fmt.Errorf("Could not get github file: %w", err)
-		}
-		content, err := f.DecodedContent()
+func (g *GitHubAPI) searchResultsMatchText(searchText []string, results []CodeSearchMatch, maxConcurrentRequests int) ([]FileMatch, error) {
+	ret := []FileMatch{}
+	resultChan := g.fileResultsFromSearchMatch(results, maxConcurrentRequests)
+	for res := range resultChan {
+		localMatch := NewFileMatchFromCodeSearch(res.searchMatch)
+		content, err := res.fileResult.DecodedContent()
 		if err != nil {
 			return nil, fmt.Errorf("Failed to decode content: %w", err)
 		}
@@ -253,8 +249,48 @@ func (g *GitHubAPI) searchResultsMatchText(searchText []string, results []CodeSe
 			}
 		}
 		if found {
-			res = append(res, *localMatch)
+			ret = append(ret, *localMatch)
 		}
 	}
-	return res, nil
+	return ret, nil
+}
+
+type concurrentFileResult struct {
+	fileResult  FileResults
+	searchMatch CodeSearchMatch
+}
+
+func (g *GitHubAPI) fileResultsFromSearchMatch(results []CodeSearchMatch, maxConcurrentRequests int) chan concurrentFileResult {
+	workToDo := make(chan CodeSearchMatch, len(results))
+	fileMatches := make(chan concurrentFileResult, len(results))
+	wg := sync.WaitGroup{}
+	for _, result := range results {
+		workToDo <- result
+	}
+	close(workToDo)
+	for i := 0; i < maxConcurrentRequests; i++ {
+		log.Debug().Int("Worker", i+1).Msg("Starting worker")
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for csm := range workToDo {
+				fr, err := g.getFile(csm.URL)
+				if err != nil {
+					log.Error().Str("url", csm.URL).Msg("Could not load github file, skipping")
+				} else {
+					log.Debug().Str("url", csm.URL).Str("Path", csm.Path).Msg("Loaded github file")
+				}
+				if fr != nil {
+					cfr := concurrentFileResult{fileResult: *fr, searchMatch: csm}
+					fileMatches <- cfr
+				}
+			}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(fileMatches)
+	}()
+
+	return fileMatches
 }

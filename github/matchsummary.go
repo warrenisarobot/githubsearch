@@ -1,22 +1,25 @@
 package github
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 type FileMatch struct {
-	RepoName string
-	Name     string
-	Path     string
+	RepoName string `json:"repoName"`
+	Name     string `json:"name"`
+	Path     string `json:"path"`
 	//raw JSON file via api
-	URL string
+	URL string `json:"url"`
 	//human readable version
-	HTMLURL     string
+	HTMLURL     string `json:"htmlURL"`
 	content     string
 	lines       []string
-	LineMatches []LineMatch
+	LineMatches []LineMatch `json:"LineMatches"`
 }
+
+type FileMatches []FileMatch
 
 type LineMatch struct {
 	Row         int
@@ -63,5 +66,22 @@ func (fm *FileMatch) String() string {
 	for index, lm := range fm.LineMatches {
 		lines[index] = fmt.Sprintf("\t%d: %s\n", lm.Row, fm.lines[lm.Row-1])
 	}
-	return fmt.Sprintf("%s\n\t%s\n%s", fm.RepoName, fm.Path, strings.Join(lines, ""))
+	return fmt.Sprintf("%s\n\t%s\n\t%s\n%s", fm.RepoName, fm.Path, fm.HTMLURL, strings.Join(lines, ""))
+}
+
+func (fm FileMatches) String() (string, error) {
+	sb := strings.Builder{}
+	for _, item := range fm {
+		sb.WriteString(fmt.Sprintf("%s\n", item.String()))
+
+	}
+	return sb.String(), nil
+}
+
+func (fm FileMatches) JSON() (string, error) {
+	data, err := json.MarshalIndent(fm, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("Unable to marshal response: %w", err)
+	}
+	return string(data), nil
 }
